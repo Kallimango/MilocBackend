@@ -3,6 +3,7 @@ import mimetypes
 import tempfile
 import uuid
 from datetime import datetime, timedelta
+from rest_framework.decorators import action
 
 from django.http import HttpResponse, Http404
 from django.conf import settings
@@ -40,6 +41,8 @@ def create_feedback(request):
         "id": feedback.id,
         "body": feedback.body,
     }, status=status.HTTP_201_CREATED)
+
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def protected_media(request, file_path):
@@ -98,9 +101,8 @@ class UserCategoryProgressView(generics.ListAPIView):
 
         image_data = [
             {
-                "image": request.build_absolute_uri(
-                    reverse("protected_media", args=[img.image.name])
-                ),
+                "id": img.id,
+                "image": request.build_absolute_uri(reverse("protected_media", args=[img.image.name])),
                 "date": img.date.isoformat()
             }
             for img in images
@@ -145,10 +147,7 @@ class ProgressImageViewSet(viewsets.ModelViewSet):
         if not image.content_type.startswith('image/'):
             raise ValidationError({"image": "Only image files are allowed."})
 
-        # always private
         obj = serializer.save(user=self.request.user, is_public=False)
-
-        # encrypt
         encrypt_file(obj.image.path, self.request.user)
 
 
@@ -163,10 +162,7 @@ class ProgressImageCreateView(generics.CreateAPIView):
         category_name = self.request.data.get("category")
         category = get_object_or_404(Category, name=category_name)
 
-        # always private
         obj = serializer.save(user=self.request.user, category=category, is_public=False)
-
-        # encrypt
         encrypt_file(obj.image.path, self.request.user)
 
 
@@ -224,7 +220,6 @@ class CreateProgressVideoView(APIView):
         start_date = images[start_index].date
         end_date = images[end_index].date
 
-        # decrypt all images since they are always private now
         for img in images[start_index:end_index + 1]:
             full_path = os.path.join(settings.MEDIA_ROOT, img.image.name)
             if not os.path.exists(full_path):
@@ -281,7 +276,6 @@ class CreateProgressVideoView(APIView):
             end_date=end_date
         )
 
-        # encrypt video
         encrypt_file(out_path, request.user)
 
         video_url = request.build_absolute_uri(reverse("protected_media", args=[rel_path]))
@@ -326,3 +320,91 @@ class UploadVideoView(APIView):
             "video_rel_path": video_rel_path,
             "caption_echo": caption
         }, status=202)
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def delete_progress_image(request, image_id):
+    try:
+        progress_image = ProgressImage.objects.get(id=image_id)
+    except ProgressImage.DoesNotExist:
+        return Response({"detail": "Progress image not found."}, status=404)
+
+    if progress_image.user != request.user:
+        return Response({"detail": "You do not have permission to delete this image."}, status=403)
+
+    image_path = progress_image.image.path
+    if os.path.exists(image_path):
+        try:
+            os.remove(image_path)
+        except Exception as e:
+            progress_image.delete()
+            return Response({
+                "message": "Progress image deleted, but file could not be removed.",
+                "error": str(e)
+            }, status=200)
+
+    progress_image.delete()
+    return Response({"message": "Progress image deleted successfully."}, status=200)
+
+
+class MaxUnitViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = MaxUnit.objects.all()
+    serializer_class = MaxUnitSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+
+class MaxCategoryViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = MaxCategory.objects.select_related("unit").all()
+    serializer_class = MaxCategorySerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+
+# =========================================================
+#                  FIXED MaxDataViewSet
+# =========================================================
+
+class MaxDataViewSet(viewsets.ModelViewSet):
+    queryset = MaxData.objects.all()
+    serializer_class = MaxDataSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    # FIX: do NOT allow text like “category” to be treated as a pk
+    lookup_value_regex = '[0-9]+'
+
+    @action(detail=False, methods=['get'], url_path='category/(?P<category_id>[0-9]+)')
+    def get_by_category(self, request, category_id=None):
+        try:
+            obj = MaxData.objects.get(
+                user=request.user,
+                category_id=category_id
+            )
+            serializer = self.get_serializer(obj)
+            return Response(serializer.data)
+        except MaxData.DoesNotExist:
+            return Response({"value": None}, status=200)
+
+    @action(detail=False, methods=['post'], url_path='category/(?P<category_id>[0-9]+)')
+    def set_by_category(self, request, category_id=None):
+        value = request.data.get("value")
+        if value is None:
+            return Response({"error": "Value required"}, status=400)
+
+        obj, created = MaxData.objects.update_or_create(
+            user=request.user,
+            category_id=category_id,
+            defaults={"value": value},
+        )
+
+        serializer = self.get_serializer(obj)
+        return Response(serializer.data, status=201)
+    @action(detail=False, methods=['get'], url_path='history/(?P<category_id>[0-9]+)')
+    def history(self, request, category_id=None):
+        qs = MaxData.objects.filter(
+            user=request.user,
+            category_id=category_id
+        ).order_by("date")
+
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
+

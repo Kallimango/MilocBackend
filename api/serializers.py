@@ -1,15 +1,15 @@
 # progress_tracking/serializers.py
 # api/serializers.py
+# progress_tracking/serializers.py
+# api/serializers.py
 from rest_framework import serializers
-from progress_tracking.models import ProgressImage, Category
-from rest_framework import serializers
+from progress_tracking.models import ProgressImage, Category, MaxUnit, MaxCategory, MaxData
 from user.models import CustomUser
-from django.contrib.auth.password_validation import validate_password
 import base64
-from io import BytesIO
 from django.core.files.base import ContentFile
 
 class RegisterSerializer(serializers.ModelSerializer):
+    password2 = serializers.CharField(write_only=True)  # ✅ Added this line
     profile_picture = serializers.ImageField(required=False)
 
     class Meta:
@@ -39,8 +39,6 @@ class RegisterSerializer(serializers.ModelSerializer):
         return user
 
 
-
-
 class CategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
@@ -57,3 +55,35 @@ class ProgressImageSerializer(serializers.ModelSerializer):
         if not value.content_type.startswith('image/'):
             raise serializers.ValidationError("Only image files are allowed.")
         return value
+
+class MaxUnitSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MaxUnit
+        fields = ["id", "name"]
+
+
+class MaxCategorySerializer(serializers.ModelSerializer):
+    unit = MaxUnitSerializer(read_only=True)
+    unit_id = serializers.PrimaryKeyRelatedField(
+        queryset=MaxUnit.objects.all(), source="unit", write_only=True
+    )
+
+    class Meta:
+        model = MaxCategory
+        fields = ["id", "name", "unit", "unit_id"]
+
+
+class MaxDataSerializer(serializers.ModelSerializer):
+    category = MaxCategorySerializer(read_only=True)
+    category_id = serializers.PrimaryKeyRelatedField(
+        queryset=MaxCategory.objects.all(), source="category", write_only=True
+    )
+
+    class Meta:
+        model = MaxData
+        fields = ["id", "user", "category", "category_id", "date", "value"]
+        read_only_fields = ["user", "date"]
+
+    def create(self, validated_data):
+        validated_data["user"] = self.context["request"].user
+        return super().create(validated_data)

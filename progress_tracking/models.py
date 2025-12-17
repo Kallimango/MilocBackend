@@ -55,3 +55,37 @@ class ProgressVideo(models.Model):
         end_date_str = self.end_date.strftime('%Y-%m-%d') if self.end_date else 'Unknown End Date'
 
         return f"{self.user.username} - {self.category.name} - {start_date_str} to {end_date_str}"
+
+class MaxUnit(models.Model):
+    name = models.CharField(max_length=50, unique=True)
+
+    def __str__(self):
+        return self.name
+
+class MaxCategory(models.Model):
+    name = models.CharField(max_length=50, unique=True)
+    unit = models.ForeignKey(
+        "MaxUnit",
+        on_delete=models.CASCADE,
+        related_name="max_category"
+    )
+
+    def __str__(self):
+        return self.name
+
+class MaxData(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="max_data_entries"  # changed from 'progress_videos'
+    )
+    category = models.ForeignKey(
+        "MaxCategory",
+        on_delete=models.CASCADE,
+        related_name="max_data"
+    )
+    date = models.DateTimeField(default=timezone.now)
+    value = models.IntegerField(blank=True)  # removed max_length
+
+    def __str__(self):
+        return f"{self.user.username} - {self.category.name} - {self.date.strftime('%Y-%m-%d')}"
