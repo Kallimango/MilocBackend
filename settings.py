@@ -31,6 +31,7 @@ ALLOWED_HOSTS = ["localhost", "127.0.0.1", "65.21.181.220"]
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:38021",
     "http://127.0.0.1:8000",
+    "milocbackend-production.up.railway.app",
 ]
 
 
