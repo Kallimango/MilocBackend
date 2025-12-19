@@ -26,7 +26,11 @@ SECRET_KEY = 'secret-key'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = [*]
+ALLOWED_HOSTS = [
+    "http://localhost:38021",
+    "http://127.0.0.1:8000",
+    "milocbackend-production.up.railway.app",
+]
 
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:38021",
