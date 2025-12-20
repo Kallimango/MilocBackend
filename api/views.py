@@ -57,12 +57,19 @@ def protected_media(request, file_path):
         video=file_path, user=request.user
     ).first()
 
+    
+
+
     if not progress_image and not progress_video:
         allowed_prefix = os.path.join("progress_videos", str(request.user.id)) + os.sep
         if not file_path.startswith(allowed_prefix):
             raise Http404("You do not have permission to access this file.")
 
     full_file_path = os.path.join(settings.MEDIA_ROOT, file_path)
+
+    if not os.path.exists(full_file_path):
+        print("❌ FILE DOES NOT EXIST:", full_file_path)
+        raise Http404("File not found.")
     if not os.path.exists(full_file_path):
         raise Http404("File not found.")
 
