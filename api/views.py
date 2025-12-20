@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timedelta
 from rest_framework.decorators import action
 
-from django.http import HttpResponse, Http404
+from django.http import Http404, FileResponse
 from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.utils.timezone import now
@@ -26,6 +26,7 @@ from .utils.encryption import encrypt_file, decrypt_file
 from django.urls import reverse
 
 from core.models import FeedbackMessage
+
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
@@ -48,9 +49,13 @@ def create_feedback(request):
 def protected_media(request, file_path):
     file_name = file_path.split("/")[-1]
 
-    # --- check permissions ---
-    progress_image = ProgressImage.objects.filter(image=file_path, user=request.user).first()
-    progress_video = ProgressVideo.objects.filter(video=file_path, user=request.user).first()
+    progress_image = ProgressImage.objects.filter(
+        image=file_path, user=request.user
+    ).first()
+
+    progress_video = ProgressVideo.objects.filter(
+        video=file_path, user=request.user
+    ).first()
 
     if not progress_image and not progress_video:
         allowed_prefix = os.path.join("progress_videos", str(request.user.id)) + os.sep
@@ -61,14 +66,18 @@ def protected_media(request, file_path):
     if not os.path.exists(full_file_path):
         raise Http404("File not found.")
 
-    is_private = (progress_image and not progress_image.is_public) or \
-                 (progress_video and not progress_video.is_public)
+    is_private = (
+        (progress_image and not progress_image.is_public) or
+        (progress_video and not progress_video.is_public)
+    )
+
+    temp_path = None
 
     if is_private:
         with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            tmp_path = tmp.name
-        decrypt_file(full_file_path, request.user, tmp_path)
-        serve_path = tmp_path
+            temp_path = tmp.name
+        decrypt_file(full_file_path, request.user, temp_path)
+        serve_path = temp_path
     else:
         serve_path = full_file_path
 
@@ -76,10 +85,26 @@ def protected_media(request, file_path):
     if not content_type:
         content_type = "application/octet-stream"
 
-    with open(serve_path, "rb") as f:
-        response = HttpResponse(f.read(), content_type=content_type)
-        response["Content-Disposition"] = f"inline; filename={file_name}"
-        return response
+    response = FileResponse(
+        open(serve_path, "rb"),
+        content_type=content_type,
+        as_attachment=False,
+    )
+
+    response["Content-Disposition"] = f'inline; filename="{file_name}"'
+
+    # cleanup temp file AFTER response is closed
+    if temp_path:
+        old_close = response.close
+
+        def close():
+            old_close()
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+        response.close = close
+
+    return response
 
 
 class UserCategoryProgressView(generics.ListAPIView):
@@ -102,7 +127,9 @@ class UserCategoryProgressView(generics.ListAPIView):
         image_data = [
             {
                 "id": img.id,
-                "image": request.build_absolute_uri(reverse("protected_media", args=[img.image.name])),
+                "image": request.build_absolute_uri(
+                    reverse("protected_media", args=[img.image.name])
+                ),
                 "date": img.date.isoformat()
             }
             for img in images
@@ -250,8 +277,13 @@ class CreateProgressVideoView(APIView):
                 clips.append(clip)
 
             final = concatenate_videoclips(clips, method="compose")
-            final.write_videofile(out_path, fps=max(1, int(round(fps))),
-                                  codec="libx264", audio=False, logger=None)
+            final.write_videofile(
+                out_path,
+                fps=max(1, int(round(fps))),
+                codec="libx264",
+                audio=False,
+                logger=None
+            )
             final.close()
         finally:
             for c in clips:
@@ -265,7 +297,10 @@ class CreateProgressVideoView(APIView):
                 except Exception:
                     pass
 
-        rel_path = os.path.join("progress_videos", str(request.user.id), out_name).replace("\\", "/")
+        rel_path = os.path.join(
+            "progress_videos", str(request.user.id), out_name
+        ).replace("\\", "/")
+
         progress_video = ProgressVideo.objects.create(
             user=request.user,
             category=category,
@@ -278,7 +313,10 @@ class CreateProgressVideoView(APIView):
 
         encrypt_file(out_path, request.user)
 
-        video_url = request.build_absolute_uri(reverse("protected_media", args=[rel_path]))
+        video_url = request.build_absolute_uri(
+            reverse("protected_media", args=[rel_path])
+        )
+
         total_frames = len(img_paths)
         total_seconds = total_frames * duration
 
@@ -360,16 +398,11 @@ class MaxCategoryViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
 
-# =========================================================
-#                  FIXED MaxDataViewSet
-# =========================================================
-
 class MaxDataViewSet(viewsets.ModelViewSet):
     queryset = MaxData.objects.all()
     serializer_class = MaxDataSerializer
     permission_classes = [permissions.IsAuthenticated]
 
-    # FIX: do NOT allow text like “category” to be treated as a pk
     lookup_value_regex = '[0-9]+'
 
     @action(detail=False, methods=['get'], url_path='category/(?P<category_id>[0-9]+)')
@@ -398,6 +431,7 @@ class MaxDataViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(obj)
         return Response(serializer.data, status=201)
+
     @action(detail=False, methods=['get'], url_path='history/(?P<category_id>[0-9]+)')
     def history(self, request, category_id=None):
         qs = MaxData.objects.filter(
@@ -407,4 +441,3 @@ class MaxDataViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(qs, many=True)
         return Response(serializer.data)
-
