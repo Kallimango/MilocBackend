@@ -24,7 +24,6 @@ POSTGRES_LOCALLY = os.getenv("POSTGRES_LOCALLY", "False") == "True"
 # ======================
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
-
 DEBUG = os.getenv("DJANGO_DEBUG", "False") == "True"
 
 ALLOWED_HOSTS = os.getenv(
@@ -59,7 +58,7 @@ INSTALLED_APPS = [
     "moviepy",
     "django_extensions",
 
-    # ✅ REQUIRED FOR WASABI
+    # REQUIRED FOR WASABI
     "storages",
 
     # My apps
@@ -86,7 +85,6 @@ APPEND_SLASH = False
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
-    "django.middleware.common.CommonMiddleware",
 
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -173,35 +171,27 @@ STATIC_URL = "/static/"
 
 
 # ======================
-# Media / Wasabi Storage
+# MEDIA — WASABI ONLY (NO LOCAL STORAGE)
 # ======================
 
 DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
 
 AWS_ACCESS_KEY_ID = os.getenv("WASABI_ACCESS_KEY")
 AWS_SECRET_ACCESS_KEY = os.getenv("WASABI_SECRET_KEY")
-
 AWS_STORAGE_BUCKET_NAME = os.getenv("WASABI_BUCKET_NAME")
 
-AWS_S3_ENDPOINT_URL = os.getenv(
-    "WASABI_ENDPOINT_URL",
-    "https://s3.wasabisys.com"
-)
-
-AWS_S3_REGION_NAME = os.getenv(
-    "WASABI_REGION",
-    "us-east-1"
-)
+AWS_S3_ENDPOINT_URL = "https://s3.wasabisys.com"
+AWS_S3_REGION_NAME = "us-east-1"
 
 AWS_S3_SIGNATURE_VERSION = "s3v4"
 AWS_S3_ADDRESSING_STYLE = "virtual"
 
-AWS_QUERYSTRING_AUTH = True   # signed URLs
+AWS_QUERYSTRING_AUTH = True
 AWS_DEFAULT_ACL = None
 AWS_S3_FILE_OVERWRITE = False
 AWS_S3_VERIFY = True
 
-MEDIA_URL = "/media/"  # kept for Django compatibility
+MEDIA_URL = "/media/"  # Django compatibility only
 
 
 # ======================
