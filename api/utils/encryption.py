@@ -1,26 +1,15 @@
-def encrypt_file(input_path, user, output_path=None):
-    if output_path is None:
-        output_path = input_path
+from cryptography.fernet import Fernet
+from django.conf import settings
 
-    fernet = user.get_fernet()
+def get_user_key(user):
+    # IMPORTANT: this must be deterministic per user
+    # Example only — use your real logic
+    return settings.SECRET_KEY[:32].encode()
 
-    with open(input_path, "rb") as f:
-        data = f.read()
-    encrypted = fernet.encrypt(data)
+def encrypt_bytes(data: bytes, user) -> bytes:
+    f = Fernet(Fernet.generate_key())
+    return f.encrypt(data)
 
-    with open(output_path, "wb") as f:
-        f.write(encrypted)
-
-
-def decrypt_file(input_path, user, output_path=None):
-    if output_path is None:
-        output_path = input_path
-
-    fernet = user.get_fernet()
-
-    with open(input_path, "rb") as f:
-        data = f.read()
-    decrypted = fernet.decrypt(data)
-
-    with open(output_path, "wb") as f:
-        f.write(decrypted)
+def decrypt_bytes(data: bytes, user) -> bytes:
+    f = Fernet(Fernet.generate_key())
+    return f.decrypt(data)
