@@ -31,6 +31,11 @@ import boto3
 from .utils.wasabi import generate_signed_url, get_decrypted_temp_file
 
 
+from django.core.files.base import ContentFile
+from .serializers import ProgressImageSerializer
+from .utils.encryption import encrypt_bytes
+
+
 # =========================
 # Wasabi S3 Client
 # =========================
@@ -199,20 +204,49 @@ class ProgressImageViewSet(viewsets.ModelViewSet):
         encrypt_file(obj.image.path, self.request.user)
 
 
+
 class ProgressImageCreateView(generics.CreateAPIView):
     serializer_class = ProgressImageSerializer
     permission_classes = [permissions.IsAuthenticated]
 
-    def get_queryset(self):
-        return ProgressImage.objects.filter(user=self.request.user)
-
     def perform_create(self, serializer):
-        category_name = self.request.data.get("category")
-        category = get_object_or_404(Category, name=category_name)
+        request = self.request
+        image = request.FILES.get("image")
 
-        obj = serializer.save(user=self.request.user, category=category, is_public=False)
-        encrypt_file(obj.image.path, self.request.user)
+        if not image:
+            raise ValidationError({"image": "No image file provided."})
 
+        if not image.content_type.startswith("image/"):
+            raise ValidationError({"image": "Only image files are allowed."})
+
+        category_name = request.data.get("category")
+        if not category_name:
+            raise ValidationError({"category": "Category is required."})
+
+        try:
+            category = Category.objects.get(name__iexact=category_name)
+        except Category.DoesNotExist:
+            raise ValidationError({"category": "Invalid category."})
+
+        # 🔐 READ ORIGINAL IMAGE BYTES
+        original_bytes = image.read()
+
+        # 🔐 ENCRYPT IN MEMORY (CRITICAL)
+        encrypted_bytes = encrypt_bytes(original_bytes, request.user)
+
+        # 🔐 CREATE A DJANGO FILE FROM ENCRYPTED BYTES
+        encrypted_file = ContentFile(
+            encrypted_bytes,
+            name=image.name
+        )
+
+        # ✅ SAVE → django-storages uploads to WASABI
+        serializer.save(
+            user=request.user,
+            category=category,
+            image=encrypted_file,
+            is_public=False
+        )
 
 # =========================
 # Register
