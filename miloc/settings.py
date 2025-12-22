@@ -193,7 +193,7 @@ AWS_S3_VERIFY = True
 
 INSTALLED_APPS += ["storages"]
 
-MEDIA_URL = f"https://{AWS_STORAGE_BUCKET_NAME}.s3.eu-central-1.wasabisys.com/"
+MEDIA_URL = f"https://{AWS_STORAGE_BUCKET_NAME}.s3.eu-central-1.wasabisys.com"
 
 
 # ======================
