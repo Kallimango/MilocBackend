@@ -180,8 +180,8 @@ AWS_ACCESS_KEY_ID = os.getenv("WASABI_ACCESS_KEY")
 AWS_SECRET_ACCESS_KEY = os.getenv("WASABI_SECRET_KEY")
 AWS_STORAGE_BUCKET_NAME = os.getenv("WASABI_BUCKET_NAME")
 
-AWS_S3_ENDPOINT_URL = "https://s3.wasabisys.com"
-AWS_S3_REGION_NAME = "us-east-1"
+AWS_S3_ENDPOINT_URL = "https://s3.eu-central-1.wasabisys.com"  # CHANGE REGION
+AWS_S3_REGION_NAME = "eu-central-1"
 
 AWS_S3_SIGNATURE_VERSION = "s3v4"
 AWS_S3_ADDRESSING_STYLE = "virtual"
@@ -190,6 +190,8 @@ AWS_QUERYSTRING_AUTH = True
 AWS_DEFAULT_ACL = None
 AWS_S3_FILE_OVERWRITE = False
 AWS_S3_VERIFY = True
+
+INSTALLED_APPS += ["storages"]
 
 MEDIA_URL = f"https://{AWS_STORAGE_BUCKET_NAME}.s3.eu-central-1.wasabisys.com/"
 
