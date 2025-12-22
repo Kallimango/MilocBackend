@@ -28,6 +28,7 @@ from django.urls import reverse
 from core.models import FeedbackMessage
 
 import boto3
+from .utils.wasabi import generate_signed_url, get_decrypted_temp_file
 
 
 # =========================
@@ -64,11 +65,14 @@ def create_feedback(request):
 # =========================
 # Protected media (Wasabi signed URL)
 # =========================
+
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def protected_media(request, file_path):
-    file_name = file_path.split("/")[-1]
-
+    """
+    Returns signed URL if public, otherwise downloads, decrypts and serves file.
+    """
     progress_image = ProgressImage.objects.filter(image=file_path, user=request.user).first()
     progress_video = ProgressVideo.objects.filter(video=file_path, user=request.user).first()
 
@@ -83,21 +87,34 @@ def protected_media(request, file_path):
         (progress_video and not progress_video.is_public)
     )
 
-    # Generate temporary signed URL if private
-    try:
-        url = s3.generate_presigned_url(
-            ClientMethod="get_object",
-            Params={
-                "Bucket": settings.AWS_STORAGE_BUCKET_NAME,
-                "Key": file_path,
-            },
-            ExpiresIn=300 if is_private else 3600  # 5 min for private, 1 hr for public
-        )
-    except Exception:
-        raise Http404("File not found on Wasabi")
+    if not is_private:
+        # Public → return signed URL
+        url = generate_signed_url(file_path, expires=3600)
+        return Response({"url": url})
 
-    return Response({"url": url})
+    # Private → download & decrypt temp file
+    temp_path = get_decrypted_temp_file(file_path, request.user)
+    file_name = os.path.basename(file_path)
+    content_type, _ = mimetypes.guess_type(file_name)
+    if not content_type:
+        content_type = "application/octet-stream"
 
+    response = FileResponse(
+        open(temp_path, "rb"),
+        content_type=content_type,
+        as_attachment=False,
+    )
+    response["Content-Disposition"] = f'inline; filename="{file_name}"'
+
+    # Delete temp file after response is closed
+    old_close = response.close
+    def close():
+        old_close()
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+    response.close = close
+
+    return response
 
 # =========================
 # User category progress
