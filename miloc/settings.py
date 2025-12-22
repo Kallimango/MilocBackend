@@ -191,7 +191,7 @@ AWS_DEFAULT_ACL = None
 AWS_S3_FILE_OVERWRITE = False
 AWS_S3_VERIFY = True
 
-MEDIA_URL = "/media/"  # Django compatibility only
+MEDIA_URL = f"https://{AWS_STORAGE_BUCKET_NAME}.s3.eu-central-1.wasabisys.com/"
 
 
 # ======================
