@@ -194,4 +194,36 @@ AWS_S3_REGION_NAME = os.getenv(
 )
 
 AWS_S3_SIGNATURE_VERSION = "s3v4"
-AWS_S3_ADDRESSING_STYLE = "virtual"_
+AWS_S3_ADDRESSING_STYLE = "virtual"
+
+AWS_QUERYSTRING_AUTH = True   # signed URLs
+AWS_DEFAULT_ACL = None
+AWS_S3_FILE_OVERWRITE = False
+AWS_S3_VERIFY = True
+
+MEDIA_URL = "/media/"  # kept for Django compatibility
+
+
+# ======================
+# Auth / user model
+# ======================
+
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+AUTH_USER_MODEL = "user.CustomUser"
+
+
+# ======================
+# CORS & Security
+# ======================
+
+CORS_ALLOW_ALL_ORIGINS = True
+
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
+
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+
+SECURE_HSTS_SECONDS = 31536000
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+SECURE_HSTS_PRELOAD = True
