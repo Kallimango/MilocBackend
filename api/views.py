@@ -27,7 +27,24 @@ from django.urls import reverse
 
 from core.models import FeedbackMessage
 
+import boto3
 
+
+# =========================
+# Wasabi S3 Client
+# =========================
+s3 = boto3.client(
+    "s3",
+    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+    region_name=settings.AWS_S3_REGION_NAME,
+    endpoint_url=settings.AWS_S3_ENDPOINT_URL,
+)
+
+
+# =========================
+# Feedback
+# =========================
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def create_feedback(request):
@@ -44,76 +61,47 @@ def create_feedback(request):
     }, status=status.HTTP_201_CREATED)
 
 
+# =========================
+# Protected media (Wasabi signed URL)
+# =========================
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def protected_media(request, file_path):
     file_name = file_path.split("/")[-1]
 
-    progress_image = ProgressImage.objects.filter(
-        image=file_path, user=request.user
-    ).first()
+    progress_image = ProgressImage.objects.filter(image=file_path, user=request.user).first()
+    progress_video = ProgressVideo.objects.filter(video=file_path, user=request.user).first()
 
-    progress_video = ProgressVideo.objects.filter(
-        video=file_path, user=request.user
-    ).first()
-
-    
-
-
+    # Access control
     if not progress_image and not progress_video:
         allowed_prefix = os.path.join("progress_videos", str(request.user.id)) + os.sep
         if not file_path.startswith(allowed_prefix):
             raise Http404("You do not have permission to access this file.")
-
-    full_file_path = os.path.join(settings.MEDIA_ROOT, file_path)
-
-    if not os.path.exists(full_file_path):
-        print("❌ FILE DOES NOT EXIST:", full_file_path)
-        raise Http404("File not found.")
-    if not os.path.exists(full_file_path):
-        raise Http404("File not found.")
 
     is_private = (
         (progress_image and not progress_image.is_public) or
         (progress_video and not progress_video.is_public)
     )
 
-    temp_path = None
+    # Generate temporary signed URL if private
+    try:
+        url = s3.generate_presigned_url(
+            ClientMethod="get_object",
+            Params={
+                "Bucket": settings.AWS_STORAGE_BUCKET_NAME,
+                "Key": file_path,
+            },
+            ExpiresIn=300 if is_private else 3600  # 5 min for private, 1 hr for public
+        )
+    except Exception:
+        raise Http404("File not found on Wasabi")
 
-    if is_private:
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            temp_path = tmp.name
-        decrypt_file(full_file_path, request.user, temp_path)
-        serve_path = temp_path
-    else:
-        serve_path = full_file_path
-
-    content_type, _ = mimetypes.guess_type(serve_path)
-    if not content_type:
-        content_type = "application/octet-stream"
-
-    response = FileResponse(
-        open(serve_path, "rb"),
-        content_type=content_type,
-        as_attachment=False,
-    )
-
-    response["Content-Disposition"] = f'inline; filename="{file_name}"'
-
-    # cleanup temp file AFTER response is closed
-    if temp_path:
-        old_close = response.close
-
-        def close():
-            old_close()
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-
-        response.close = close
-
-    return response
+    return Response({"url": url})
 
 
+# =========================
+# User category progress
+# =========================
 class UserCategoryProgressView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -145,6 +133,9 @@ class UserCategoryProgressView(generics.ListAPIView):
         return Response({"images": image_data})
 
 
+# =========================
+# Logout
+# =========================
 class LogoutView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -160,12 +151,18 @@ class LogoutView(APIView):
             return Response({"detail": "Invalid or expired token."}, status=status.HTTP_400_BAD_REQUEST)
 
 
+# =========================
+# Categories
+# =========================
 class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
     permission_classes = [permissions.IsAuthenticated]
 
 
+# =========================
+# Progress Images
+# =========================
 class ProgressImageViewSet(viewsets.ModelViewSet):
     serializer_class = ProgressImageSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -200,12 +197,18 @@ class ProgressImageCreateView(generics.CreateAPIView):
         encrypt_file(obj.image.path, self.request.user)
 
 
+# =========================
+# Register
+# =========================
 class RegisterView(generics.CreateAPIView):
     queryset = CustomUser.objects.all()
     permission_classes = [AllowAny]
     serializer_class = RegisterSerializer
 
 
+# =========================
+# Create Progress Video
+# =========================
 class CreateProgressVideoView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -255,19 +258,16 @@ class CreateProgressVideoView(APIView):
         end_date = images[end_index].date
 
         for img in images[start_index:end_index + 1]:
-            full_path = os.path.join(settings.MEDIA_ROOT, img.image.name)
-            if not os.path.exists(full_path):
-                return Response({"detail": f"File missing on server: {img.image.name}"}, status=400)
-
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(full_path)[1])
-            decrypt_file(full_path, request.user, tmp.name)
+            # Generate temp file to decrypt locally
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(img.image.name)[1])
+            decrypt_file(img.image.path, request.user, tmp.name)
             img_paths.append(tmp.name)
             temp_files.append(tmp.name)
 
         if fps <= 0:
             return Response({"detail": "fps must be > 0"}, status=400)
 
-        user_folder = os.path.join(settings.MEDIA_ROOT, "progress_videos", str(request.user.id))
+        user_folder = os.path.join("progress_videos", str(request.user.id))
         os.makedirs(user_folder, exist_ok=True)
 
         stamp = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
@@ -304,9 +304,7 @@ class CreateProgressVideoView(APIView):
                 except Exception:
                     pass
 
-        rel_path = os.path.join(
-            "progress_videos", str(request.user.id), out_name
-        ).replace("\\", "/")
+        rel_path = os.path.join(user_folder, out_name).replace("\\", "/")
 
         progress_video = ProgressVideo.objects.create(
             user=request.user,
@@ -320,9 +318,7 @@ class CreateProgressVideoView(APIView):
 
         encrypt_file(out_path, request.user)
 
-        video_url = request.build_absolute_uri(
-            reverse("protected_media", args=[rel_path])
-        )
+        video_url = request.build_absolute_uri(reverse("protected_media", args=[rel_path]))
 
         total_frames = len(img_paths)
         total_seconds = total_frames * duration
@@ -338,6 +334,9 @@ class CreateProgressVideoView(APIView):
         })
 
 
+# =========================
+# Upload video placeholder
+# =========================
 class UploadVideoView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -351,14 +350,6 @@ class UploadVideoView(APIView):
         if not video_rel_path:
             return Response({"detail": "video_rel_path is required."}, status=400)
 
-        expected_prefix = os.path.join("progress_videos", str(request.user.id)) + os.sep
-        if not video_rel_path.startswith(expected_prefix):
-            return Response({"detail": "Not allowed to upload this file."}, status=403)
-
-        full_path = os.path.join(settings.MEDIA_ROOT, video_rel_path)
-        if not os.path.exists(full_path):
-            return Response({"detail": "Video not found on server."}, status=404)
-
         return Response({
             "status": "accepted",
             "detail": f"Upload to {platform} is not yet configured.",
@@ -367,6 +358,9 @@ class UploadVideoView(APIView):
         }, status=202)
 
 
+# =========================
+# Delete progress image
+# =========================
 @api_view(["DELETE"])
 @permission_classes([IsAuthenticated])
 def delete_progress_image(request, image_id):
@@ -378,21 +372,18 @@ def delete_progress_image(request, image_id):
     if progress_image.user != request.user:
         return Response({"detail": "You do not have permission to delete this image."}, status=403)
 
-    image_path = progress_image.image.path
-    if os.path.exists(image_path):
-        try:
-            os.remove(image_path)
-        except Exception as e:
-            progress_image.delete()
-            return Response({
-                "message": "Progress image deleted, but file could not be removed.",
-                "error": str(e)
-            }, status=200)
+    try:
+        s3.delete_object(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=progress_image.image.name)
+    except Exception:
+        pass
 
     progress_image.delete()
     return Response({"message": "Progress image deleted successfully."}, status=200)
 
 
+# =========================
+# Max unit/category/data
+# =========================
 class MaxUnitViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = MaxUnit.objects.all()
     serializer_class = MaxUnitSerializer
@@ -415,10 +406,7 @@ class MaxDataViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='category/(?P<category_id>[0-9]+)')
     def get_by_category(self, request, category_id=None):
         try:
-            obj = MaxData.objects.get(
-                user=request.user,
-                category_id=category_id
-            )
+            obj = MaxData.objects.get(user=request.user, category_id=category_id)
             serializer = self.get_serializer(obj)
             return Response(serializer.data)
         except MaxData.DoesNotExist:
@@ -441,10 +429,6 @@ class MaxDataViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='history/(?P<category_id>[0-9]+)')
     def history(self, request, category_id=None):
-        qs = MaxData.objects.filter(
-            user=request.user,
-            category_id=category_id
-        ).order_by("date")
-
+        qs = MaxData.objects.filter(user=request.user, category_id=category_id).order_by("date")
         serializer = self.get_serializer(qs, many=True)
         return Response(serializer.data)
